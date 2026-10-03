@@ -1,0 +1,22 @@
+name: saathi-finance-dev
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: saathi_loans
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - saathi_dev_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d saathi_loans"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  saathi_dev_db:

@@ -1,0 +1,17 @@
+openapi: 3.1.0
+info: {title: Saathi Loan Pilot API, version: 1.0.0}
+servers: [{url: http://localhost:4000/api}]
+components:
+  securitySchemes: {bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}}
+  schemas:
+    Error: {type: object, properties: {error: {type: object, properties: {code: {type: string}, message: {type: string}}}}}
+security: [{bearerAuth: []}]
+paths:
+  /auth/register: {post: {security: [], summary: Register a customer, responses: {'201': {description: Created}, '400': {description: Invalid input}}}}
+  /auth/login: {post: {security: [], summary: Authenticate, responses: {'200': {description: JWT and user}, '401': {description: Invalid credentials}}}}
+  /applications: {get: {summary: List own applications or admin queue, responses: {'200': {description: Paginated applications}}}, post: {summary: Save a customer application, responses: {'201': {description: Draft created}}}}
+  /applications/{id}: {get: {summary: Read an owned application or admin view, parameters: [{in: path, name: id, required: true, schema: {type: string, format: uuid}}], responses: {'200': {description: Application}, '403': {description: Ownership denied}}}}
+  /applications/{id}/submit: {post: {summary: Submit a draft, parameters: [{in: path, name: id, required: true, schema: {type: string}}], responses: {'200': {description: Submitted}, '409': {description: Invalid transition}}}}
+  /offers/{id}/accept: {post: {summary: Explicitly accept presented terms, parameters: [{in: path, name: id, required: true, schema: {type: string}}], responses: {'200': {description: Loan awaiting disbursement}}}}
+  /admin/loans/{id}/disbursements: {post: {summary: Record a manual bank transfer, parameters: [{in: header, name: Idempotency-Key, required: true, schema: {type: string}}, {in: path, name: id, required: true, schema: {type: string}}], responses: {'201': {description: Transfer record}}}}
+  /admin/loans/{id}/payments: {post: {summary: Record and optionally confirm a payment, parameters: [{in: header, name: Idempotency-Key, required: true, schema: {type: string}}, {in: path, name: id, required: true, schema: {type: string}}], responses: {'201': {description: Payment record}}}}
