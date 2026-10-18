@@ -170,6 +170,101 @@ export function registerAdminRoutes(app: Express, deps: any) {
     res.json({data:out});
   }));
 
+  app.post('/api/admin/quick-cash-payment', admins, asyncRoute(async(req:any,res:any)=>{
+    const {loanId,amountPaise,paymentDate,reference,notes}=req.body;
+    if(!loanId||!Number.isInteger(amountPaise)||amountPaise<=0){
+      return res.status(400).json({error:{code:'VALIDATION_ERROR',message:'Valid loan ID and payment amount are required.'}});
+    }
+    const date=paymentDate&&/^\d{4}-\d{2}-\d{2}$/.test(String(paymentDate))?paymentDate:new Date().toISOString().slice(0,10);
+    const ref=String(reference||'').trim()||`CASH-${Date.now().toString().slice(-6)}-${Math.floor(Math.random()*900+100)}`;
+    const key=`cash-admin-${loanId}-${Date.now()}-${Math.random()}`;
+
+    const out=await tx(async(c:any)=>{
+      const l=(await c.query(`SELECT l.*,p.name customer_name,p.mobile customer_mobile,o.total_payable_paise FROM loans l JOIN customer_profiles p ON p.user_id=l.customer_id JOIN offers o ON o.id=l.offer_id WHERE l.id=$1 FOR UPDATE OF l`,[loanId])).rows[0];
+      if(!l||l.status!=='active')throw Object.assign(new Error('Payments require an active loan'),{status:409});
+
+      const p=(await c.query(
+        `INSERT INTO payments(loan_id,status,amount_paise,payment_date,method,reference,recorded_by,idempotency_key,confirmed_at)
+         VALUES($1,'confirmed',$2,$3,'cash',$4,$5,$6,now()) RETURNING *`,
+        [l.id,amountPaise,date,ref,req.user.id,key]
+      )).rows[0];
+
+      let remaining=Number(amountPaise);
+      const due=await c.query(
+        `SELECT i.id,i.number,i.due_date,(i.total_due_paise-COALESCE(SUM(pa.amount_paise) FILTER(WHERE py.status='confirmed'),0))::bigint outstanding
+         FROM instalments i
+         LEFT JOIN payment_allocations pa ON pa.instalment_id=i.id
+         LEFT JOIN payments py ON py.id=pa.payment_id
+         WHERE i.loan_id=$1
+         GROUP BY i.id
+         ORDER BY i.number`,
+        [l.id]
+      );
+
+      const allocatedInstalments:any[]=[];
+      for(const row of due.rows){
+        const allocation=Math.min(remaining,Number(row.outstanding));
+        if(allocation>0){
+          await c.query('INSERT INTO payment_allocations(payment_id,instalment_id,amount_paise) VALUES($1,$2,$3)',[p.id,row.id,allocation]);
+          remaining-=allocation;
+          allocatedInstalments.push({number:row.number,due_date:row.due_date,amount_paise:allocation});
+        }
+        if(!remaining)break;
+      }
+
+      if(remaining>0)throw Object.assign(new Error(`Payment amount exceeds remaining loan balance`),{status:409});
+
+      const balanceRes=await c.query(
+        `SELECT COALESCE(SUM(i.total_due_paise),0)-COALESCE((SELECT SUM(pa.amount_paise) FROM payment_allocations pa JOIN payments py ON py.id=pa.payment_id JOIN instalments ix ON ix.id=pa.instalment_id WHERE ix.loan_id=$1 AND py.status='confirmed'),0) outstanding
+         FROM instalments i WHERE i.loan_id=$1`,
+        [l.id]
+      );
+      const newOutstanding=Number(balanceRes.rows[0].outstanding);
+      let finalStatus=l.status;
+      if(newOutstanding===0){
+        await c.query("UPDATE loans SET status='completed' WHERE id=$1",[l.id]);
+        finalStatus='completed';
+      }
+
+      if(notes&&String(notes).trim()){
+        await c.query('INSERT INTO admin_notes(loan_id,admin_id,note,contact_channel) VALUES($1,$2,$3,$4)',[l.id,req.user.id,`[Cash Collection Receipt #${ref}] `+String(notes).trim(),'in_person']);
+      }
+
+      await audit(c,req.user.id,'payment',p.id,'confirmed',null,p,`Direct cash EMI collection receipt #${ref} recorded by admin`);
+
+      const nextDue=await c.query(
+        `SELECT i.due_date,(i.total_due_paise-COALESCE(SUM(pa.amount_paise) FILTER(WHERE py.status='confirmed'),0))::bigint due_amount
+         FROM instalments i
+         LEFT JOIN payment_allocations pa ON pa.instalment_id=i.id
+         LEFT JOIN payments py ON py.id=pa.payment_id
+         WHERE i.loan_id=$1
+         GROUP BY i.id
+         HAVING i.total_due_paise>COALESCE(SUM(pa.amount_paise) FILTER(WHERE py.status='confirmed'),0)
+         ORDER BY i.number LIMIT 1`,
+        [l.id]
+      );
+
+      return {
+        payment:p,
+        receipt:{
+          receiptNumber:ref,
+          paymentDate:date,
+          amountPaise,
+          customerName:l.customer_name,
+          customerMobile:l.customer_mobile,
+          loanId:l.id,
+          status:finalStatus,
+          newOutstandingPaise:newOutstanding,
+          nextDueDate:nextDue.rows[0]?.due_date||null,
+          nextDueAmountPaise:nextDue.rows[0]?.due_amount||0,
+          allocatedInstalments
+        }
+      };
+    });
+
+    res.status(201).json({data:out});
+  }));
+
   app.get('/api/admin/settings', admins, asyncRoute(async (_req:any,res:any)=>{const r=await pool.query('SELECT key,value,updated_at FROM settings ORDER BY key');res.json({data:Object.fromEntries(r.rows.map((x:any)=>[x.key,x.value]))})}));
   app.put('/api/admin/settings/:key', superAdmins, asyncRoute(async(req:any,res:any)=>{
     if(!['support','offer_defaults','privacy'].includes(req.params.key))return res.status(400).json({error:{code:'VALIDATION_ERROR',message:'Unknown setting.'}});
@@ -189,6 +284,26 @@ export function registerAdminRoutes(app: Express, deps: any) {
     (SELECT COALESCE(SUM(amount_paise),0) FROM payments WHERE status='confirmed')::bigint collected_paise,
     (SELECT COUNT(*) FROM payments WHERE status='pending_verification')::int pending_payments,
     (SELECT COALESCE(SUM(i.total_due_paise),0) - COALESCE((SELECT SUM(pa.amount_paise) FROM payment_allocations pa JOIN payments p ON p.id=pa.payment_id WHERE p.status='confirmed'),0) FROM instalments i JOIN loans l ON l.id=i.loan_id WHERE l.status='active')::bigint active_outstanding_paise`);res.json({data:r.rows[0]})}));
+
+  app.get('/api/admin/dashboard-v2', admins, asyncRoute(async(req:any,res:any)=>{
+    const year=Math.min(2100,Math.max(2000,Number(req.query.year)||new Date().getFullYear()));
+    const [summary,monthly,accounts,reminders,recent]=await Promise.all([
+      pool.query(`WITH eligible AS (SELECT l.id,l.customer_id,l.status,o.total_payable_paise,(l.terms_snapshot->>'principalPaise')::bigint principal_paise, COALESCE((SELECT SUM(pa.amount_paise) FROM payment_allocations pa JOIN payments p ON p.id=pa.payment_id WHERE p.status='confirmed' AND pa.instalment_id IN (SELECT id FROM instalments WHERE loan_id=l.id)),0)::bigint paid, EXISTS(SELECT 1 FROM instalments i WHERE i.loan_id=l.id AND i.due_date<CURRENT_DATE AND i.total_due_paise>COALESCE((SELECT SUM(pa.amount_paise) FROM payment_allocations pa JOIN payments p ON p.id=pa.payment_id WHERE pa.instalment_id=i.id AND p.status='confirmed'),0)) overdue FROM loans l JOIN offers o ON o.id=l.offer_id WHERE l.status IN ('active','completed')) SELECT COUNT(DISTINCT customer_id)::int borrowers,COUNT(*)::int accounts,COALESCE(SUM(principal_paise),0)::bigint loan_amount_paise,COALESCE(SUM(total_payable_paise),0)::bigint total_payable_paise,COALESCE(SUM(paid),0)::bigint paid_paise,COALESCE(SUM(total_payable_paise-paid),0)::bigint outstanding_paise,COUNT(*) FILTER(WHERE status='completed')::int paid_accounts,COUNT(*) FILTER(WHERE status='active' AND overdue)::int overdue_accounts,COUNT(*) FILTER(WHERE status='active' AND NOT overdue)::int active_accounts FROM eligible`),
+      pool.query(`WITH months AS (SELECT generate_series(1,12) AS month_no), expected AS (SELECT EXTRACT(MONTH FROM i.due_date)::int AS month_no,SUM(i.total_due_paise)::bigint amount FROM instalments i JOIN loans l ON l.id=i.loan_id WHERE EXTRACT(YEAR FROM i.due_date)=$1 AND l.status IN ('active','completed') GROUP BY 1), actual AS (SELECT EXTRACT(MONTH FROM p.payment_date)::int AS month_no,SUM(p.amount_paise)::bigint amount FROM payments p WHERE p.status='confirmed' AND EXTRACT(YEAR FROM p.payment_date)=$1 GROUP BY 1) SELECT m.month_no,COALESCE(e.amount,0)::bigint expected_paise,COALESCE(a.amount,0)::bigint actual_paise FROM months m LEFT JOIN expected e USING(month_no) LEFT JOIN actual a USING(month_no) ORDER BY m.month_no`,[year]),
+      pool.query(`SELECT l.id,l.application_id,l.status,l.created_at,l.activated_at,p.name,p.mobile,o.total_payable_paise,(l.terms_snapshot->>'principalPaise')::bigint loan_amount_paise,(l.terms_snapshot->>'instalments')::int tenure,
+        (SELECT due_date FROM instalments WHERE loan_id=l.id ORDER BY number LIMIT 1) first_emi_date,
+        COALESCE((SELECT SUM(pa.amount_paise) FROM payment_allocations pa JOIN payments py ON py.id=pa.payment_id JOIN instalments ix ON ix.id=pa.instalment_id WHERE ix.loan_id=l.id AND py.status='confirmed'),0)::bigint paid_paise,
+        (SELECT due_date FROM instalments i WHERE i.loan_id=l.id AND i.total_due_paise>COALESCE((SELECT SUM(pa.amount_paise) FROM payment_allocations pa JOIN payments py ON py.id=pa.payment_id WHERE pa.instalment_id=i.id AND py.status='confirmed'),0) ORDER BY i.number LIMIT 1) next_due_date,
+        (SELECT total_due_paise FROM instalments WHERE loan_id=l.id ORDER BY number LIMIT 1)::bigint emi_paise,
+        EXISTS(SELECT 1 FROM instalments i WHERE i.loan_id=l.id AND i.due_date<CURRENT_DATE AND i.total_due_paise>COALESCE((SELECT SUM(pa.amount_paise) FROM payment_allocations pa JOIN payments py ON py.id=pa.payment_id WHERE pa.instalment_id=i.id AND py.status='confirmed'),0)) is_overdue,
+        COALESCE((SELECT (i.total_due_paise - COALESCE((SELECT SUM(pa.amount_paise) FROM payment_allocations pa JOIN payments py ON py.id=pa.payment_id WHERE pa.instalment_id=i.id AND py.status='confirmed'),0)) FROM instalments i WHERE i.loan_id=l.id AND i.total_due_paise>COALESCE((SELECT SUM(pa.amount_paise) FROM payment_allocations pa JOIN payments py ON py.id=pa.payment_id WHERE pa.instalment_id=i.id AND py.status='confirmed'),0) ORDER BY i.number LIMIT 1), 0)::bigint next_due_amount_paise
+        FROM loans l JOIN customer_profiles p ON p.user_id=l.customer_id JOIN offers o ON o.id=l.offer_id ORDER BY l.created_at DESC LIMIT 2000`),
+      pool.query(`SELECT l.id loan_id,p.name,i.due_date,(i.total_due_paise-COALESCE((SELECT SUM(pa.amount_paise) FROM payment_allocations pa JOIN payments py ON py.id=pa.payment_id WHERE pa.instalment_id=i.id AND py.status='confirmed'),0))::bigint amount_due_paise FROM instalments i JOIN loans l ON l.id=i.loan_id JOIN customer_profiles p ON p.user_id=l.customer_id WHERE l.status='active' AND i.total_due_paise>COALESCE((SELECT SUM(pa.amount_paise) FROM payment_allocations pa JOIN payments py ON py.id=pa.payment_id WHERE pa.instalment_id=i.id AND py.status='confirmed'),0) ORDER BY i.due_date LIMIT 12`),
+      pool.query(`SELECT py.id,py.loan_id,p.name,py.amount_paise,py.payment_date,py.method,py.reference FROM payments py JOIN loans l ON l.id=py.loan_id JOIN customer_profiles p ON p.user_id=l.customer_id WHERE py.status='confirmed' ORDER BY py.payment_date DESC,py.created_at DESC LIMIT 8`)
+    ]);
+    const currentMonth=monthly.rows.find((x:any)=>Number(x.month_no)===new Date().getMonth()+1);
+    res.json({data:{year,summary:{...summary.rows[0],monthly_emi_paise:Math.round(monthly.rows.reduce((s:number,x:any)=>s+Number(x.expected_paise),0)/12),current_month_collection_paise:currentMonth?.actual_paise||0},monthly:monthly.rows,accounts:accounts.rows,reminders:reminders.rows,recent:recent.rows,actualCollectionDefinition:'Confirmed cash received during the selected calendar month.'}});
+  }));
 
   app.get('/api/admin/reports/applications.csv', admins, asyncRoute(async(_req:any,res:any)=>{
     const r=await pool.query(`SELECT a.id,p.name,a.status,a.requested_amount_paise,a.purpose,a.created_at FROM applications a JOIN customer_profiles p ON p.user_id=a.customer_id ORDER BY a.created_at DESC`);

@@ -24,7 +24,7 @@ npm run db:seed
 npm run dev
 ```
 
-Open `http://localhost:5173`; API health is `http://localhost:4000/health`. Seed password defaults to `PilotPass123!` and may be overridden with `SEED_PASSWORD`. Fictional accounts are `superadmin@saathi.test`, `admin@saathi.test`, `asha@saathi.test`, and `ravi@saathi.test`. Change all seed credentials outside local development.
+Open `http://localhost:5174`; API health is `http://localhost:4000/health`. Seed password defaults to `PilotPass123!` and may be overridden with `SEED_PASSWORD`. Fictional accounts are `superadmin@saathi.test`, `admin@saathi.test`, `asha@saathi.test`, and `ravi@saathi.test`. Change all seed credentials outside local development.
 
 Run verification:
 
