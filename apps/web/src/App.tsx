@@ -1,12 +1,22 @@
 import'./landing.css';import{useEffect,useState,type FormEvent,type ReactNode}from'react';import{Navigate,NavLink,Route,Routes,useNavigate}from'react-router-dom';import{AdminApplicationDetail,AdminApplications,AdminAudit,AdminLoanDetail,AdminLoans,AdminPayments,AdminReports,AdminSettings,AdminUsers}from'./Admin';import AdminDashboard from'./AdminDashboardV2';import CustomerApplication from'./CustomerApplication';import ProfilePage from'./ProfilePage';import EmiCalculator from'./EmiCalculator';import{CustomerLoanDetail,CustomerLoans,CustomerPayments}from'./FinancePages';import{Support}from'./CustomerPages';import FinancialGuide from'./FinancialGuide';
-const API=import.meta.env.VITE_API_URL||'http://localhost:4000/api';export type User={id:string;email:string;role:'customer'|'admin'|'super_admin';name?:string;mobile?:string;whatsapp?:string;address?:string};
-export async function request(path:string,options:RequestInit={}){const token=localStorage.getItem('token');let r:Response;try{r=await fetch(API+path,{...options,headers:{...(options.body instanceof FormData?{}:{'Content-Type':'application/json'}),...(token?{Authorization:`Bearer ${token}`}:{}) as any,...options.headers}})}catch{throw new Error('Cannot connect to the server. Keep npm run dev running and try again.')}const body=await r.json().catch(()=>({}));if(!r.ok){const issue=body.error?.details?.issues?.[0];const field=issue?.path?issue.path.split('.').pop()?.replace(/([A-Z])/g,' $1').toLowerCase():'';throw new Error(issue?(field+': '+issue.message):(body.error?.message||'Request failed'))}return body.data}
+const API=import.meta.env.VITE_API_URL||'/api';export type User={id:string;email:string;role:'customer'|'admin'|'super_admin';name?:string;mobile?:string;whatsapp?:string;address?:string};
+export async function request(path:string,options:RequestInit={}){const token=localStorage.getItem('token');const ctrl=new AbortController();const timer=setTimeout(()=>ctrl.abort(),8000);let r:Response;try{r=await fetch(API+path,{...options,signal:options.signal||ctrl.signal,headers:{...(options.body instanceof FormData?{}:{'Content-Type':'application/json'}),...(token?{Authorization:`Bearer ${token}`}:{}) as any,...options.headers}})}catch(e:any){throw new Error(e.name==='AbortError'?'Connection timed out. Keep npm run dev running and try again.':'Cannot connect to the server. Keep npm run dev running and try again.')}finally{clearTimeout(timer)}const body=await r.json().catch(()=>({}));if(!r.ok){const issue=body.error?.details?.issues?.[0];const field=issue?.path?issue.path.split('.').pop()?.replace(/([A-Z])/g,' $1').toLowerCase():'';throw new Error(issue?(field+': '+issue.message):(body.error?.message||'Request failed'))}return body.data}
 export const money=(p:number|string=0)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(Number(p)/100);
 function Brand(){return <div className="brand"><span className="brandmark">S</span><span>Saathi<small>FINANCE</small></span></div>}
-function Landing({onLogin,onRegister,onGuide}:{onLogin:()=>void;onRegister:()=>void;onGuide:()=>void}){return <main className="landing">
-  <header className="landing-nav"><Brand/><nav><a href="#how">How it works</a><a href="#features">Features</a><button type="button" className="landing-text-button" onClick={onGuide} style={{fontWeight:600,color:'#16483d'}}>वित्तीय समझ (Guide)</button><a href="#support">Support</a></nav><div><button type="button" className="landing-text-button" onClick={onLogin}>Sign in</button><button type="button" className="landing-primary" onClick={onRegister}>Apply for a loan</button></div></header>
-  <section className="landing-hero"><img src="/saathi-hero.png" alt="Small business owner reviewing her repayment plan"/><div className="landing-shade"/><div className="landing-hero-copy"><span>RESPONSIBLE LENDING, CLEAR REPAYMENTS</span><h1>Saathi Finance</h1><p>Understand your offer, every EMI amount, every due date, and every confirmed payment from one secure mobile account.</p><div><button type="button" className="landing-primary" onClick={onRegister}>Start your application</button><button type="button" className="landing-secondary" onClick={onLogin}>Track my loan</button><button type="button" className="landing-text-button" onClick={onGuide} style={{color:'#fff',marginLeft:'0.5rem',textDecoration:'underline'}}>वित्तीय समझ एवं 5 नियम →</button></div><small>Loan approval is subject to review. The application does not guarantee approval.</small></div></section>
-  <section className="landing-guide-promo" style={{maxWidth:'1100px',margin:'2rem auto',padding:'1.5rem',background:'#f4f8f6',border:'1px solid #cfe0d8',borderRadius:'16px',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'1rem'}}>
+function Landing({onLogin,onRegister,onGuide,onCalculator}:{onLogin:()=>void;onRegister:()=>void;onGuide:()=>void;onCalculator:()=>void}){return <main className="landing">
+  <header className="landing-nav"><Brand/><nav><a href="#how">How it works</a><a href="#features">Features</a><button type="button" className="landing-text-button" onClick={onCalculator} style={{fontWeight:600,color:'#16483d'}}>Loan Calculator</button><button type="button" className="landing-text-button" onClick={onGuide} style={{fontWeight:600,color:'#16483d'}}>वित्तीय समझ (Guide)</button><a href="#support">Support</a></nav><div><button type="button" className="landing-text-button" onClick={onLogin}>Sign in</button><button type="button" className="landing-primary" onClick={onRegister}>Apply for a loan</button></div></header>
+  <section className="landing-hero"><img src="/saathi-hero.png" alt="Small business owner reviewing her repayment plan"/><div className="landing-shade"/><div className="landing-hero-copy"><span>RESPONSIBLE LENDING, CLEAR REPAYMENTS</span><h1>Saathi Finance</h1><p>Understand your offer, every EMI amount, every due date, and every confirmed payment from one secure mobile account.</p><div><button type="button" className="landing-primary" onClick={onRegister}>Start your application</button><button type="button" className="landing-secondary" onClick={onCalculator}>Calculate my EMI</button><button type="button" className="landing-text-button" onClick={onGuide} style={{color:'#fff',marginLeft:'0.5rem',textDecoration:'underline'}}>वित्तीय समझ एवं 5 नियम →</button></div><small>Loan approval is subject to review. The application does not guarantee approval.</small></div></section>
+  <section className="landing-calc-promo" style={{maxWidth:'1100px',margin:'2rem auto 1rem',padding:'1.6rem 1.8rem',background:'#ffffff',border:'1px solid #c8d8d1',borderRadius:'16px',boxShadow:'0 4px 20px rgba(18,61,53,0.05)',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'1.25rem'}}>
+    <div style={{maxWidth:'640px'}}>
+      <small style={{background:'#123d35',color:'#fff',padding:'0.25rem 0.6rem',borderRadius:'4px',fontWeight:'bold',fontSize:'11px',letterSpacing:'1px'}}>LOAN EMI CALCULATOR</small>
+      <h3 style={{margin:'0.5rem 0 0.3rem',color:'#123d35',fontSize:'1.35rem',letterSpacing:'-0.5px'}}>Know your monthly instalment before you borrow</h3>
+      <p style={{margin:0,color:'#4f6861',fontSize:'0.94rem',lineHeight:1.5}}>Explore reducing balance vs. flat rate, compare interest charges, and check your EMI against the safe 30% income rule.</p>
+    </div>
+    <div style={{display:'flex',gap:'0.75rem'}}>
+      <button type="button" className="landing-primary" onClick={onCalculator} style={{padding:'0.75rem 1.4rem',fontSize:'0.95rem'}}>Open Loan Calculator →</button>
+    </div>
+  </section>
+  <section className="landing-guide-promo" style={{maxWidth:'1100px',margin:'1rem auto 2rem',padding:'1.5rem',background:'#f4f8f6',border:'1px solid #cfe0d8',borderRadius:'16px',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'1rem'}}>
     <div>
       <small style={{background:'#e8b55e',color:'#123d35',padding:'0.2rem 0.5rem',borderRadius:'4px',fontWeight:'bold'}}>जिम्मेदार ऋण (RESPONSIBLE BORROWING)</small>
       <h3 style={{margin:'0.4rem 0 0.2rem',color:'#123d35',fontSize:'1.25rem'}}>EMI लोन: समझदारी से लिया गया फ़ैसला, सुरक्षित भविष्य की चाबी</h3>
@@ -206,9 +216,32 @@ function CustomerHome({user}:{user:User}){
 }
 
 const initial={name:'',dateOfBirth:'',guardianName:'',mobile:'',whatsapp:'',address:'',monthlyIncome:'',purpose:'',amount:'',kin:'',relationship:'',bank:'',holder:'',ifsc:'',account:'',w1name:'',w1guardian:'',w1mobile:'',w1address:'',w2name:'',w2guardian:'',w2mobile:'',w2address:''};
-function Apply(){
-  const[step,setStep]=useState(0),[f,setF]=useState<any>(()=>JSON.parse(localStorage.getItem('loan-draft')||JSON.stringify(initial))),[error,setError]=useState(''),nav=useNavigate();
-  const set=(k:string,v:string)=>setF({...f,[k]:v});
+function Apply({user}:{user?:User}){
+  const[step,setStep]=useState(0);
+  const[f,setF]=useState<any>(()=>{
+    const draft = localStorage.getItem('loan-draft');
+    let loaded: any = {};
+    if (draft) {
+      try { loaded = JSON.parse(draft); } catch {}
+    }
+    let calcAmount = '';
+    try {
+      const calcPlan = JSON.parse(localStorage.getItem('loan-calculator-plan') || '{}');
+      if (calcPlan.principal) calcAmount = String(calcPlan.principal);
+    } catch {}
+
+    return {
+      ...initial,
+      name: loaded.name || user?.name || '',
+      mobile: loaded.mobile || user?.mobile || '',
+      whatsapp: loaded.whatsapp || user?.whatsapp || user?.mobile || '',
+      address: loaded.address || user?.address || '',
+      amount: loaded.amount || calcAmount || '',
+      ...loaded
+    };
+  });
+  const[error,setError]=useState(''),nav=useNavigate();
+  const set=(k:string,v:string)=>setF((prev:any)=>({...prev,[k]:v}));
   const save=()=>{localStorage.setItem('loan-draft',JSON.stringify(f));setError('Draft saved on this device.')};
   const submit=async()=>{
     try{
@@ -221,7 +254,7 @@ function Apply(){
       })});
       await request(`/applications/${a.id}/submit`,{method:'POST'});
       localStorage.removeItem('loan-draft');
-      nav('/');
+      nav(`/applications/${a.id}`);
     }catch(e){setError((e as Error).message)}
   };
   const requiredByStep=[
@@ -318,8 +351,44 @@ function Loans(){const[loans,setLoans]=useState<any[]>([]);useEffect(()=>{reques
 function AdminHome(){const[d,setD]=useState<any>({});useEffect(()=>{request('/admin/dashboard').then(setD)},[]);return <><div className="pagehead"><div><span className="eyebrow">PILOT OPERATIONS</span><h1>Good morning.</h1><p>Hereâ€™s what needs attention today.</p></div><span className="date">LIVE OVERVIEW</span></div><div className="stats">{[['New applications',d.new_applications||0,'Review queue'],['Pending reviews',d.pending_reviews||0,'In progress'],['Awaiting transfer',d.awaiting_disbursement||0,'Record manually'],['Overdue EMIs',d.overdue_emis||0,'Needs attention']].map(([l,v,s],i)=><article key={l as string} className={i===3?'warn':''}><span>{l}</span><strong>{v}</strong><small>{s}</small></article>)}</div><section className="panel"><div className="panel-title"><div><span className="eyebrow">NEXT ACTIONS</span><h2>Keep the queue moving</h2></div><NavLink to="/admin/applications">View all applications â†’</NavLink></div><div className="action-grid"><div><b>01</b><h3>Review submitted applications</h3><p>Verify customer, witnesses, documents, and bank details.</p></div><div><b>02</b><h3>Confirm accepted offers</h3><p>Record transfers only after funds actually leave the bank.</p></div><div><b>03</b><h3>Reconcile repayments</h3><p>EMIs update only after payments are confirmed.</p></div></div></section></>}
 function Applications(){const[rows,setRows]=useState<any[]>([]),[status,setStatus]=useState('');useEffect(()=>{request('/applications'+(status?`?status=${status}`:'')).then(setRows)},[status]);return <><div className="pagehead"><div><span className="eyebrow">APPLICATION QUEUE</span><h1>Applications</h1><p>Review and move each case deliberately.</p></div><select value={status} onChange={e=>setStatus(e.target.value)}><option value="">All statuses</option><option>submitted</option><option>under_review</option><option>information_requested</option><option>approved</option><option>rejected</option></select></div><div className="table"><div className="tr th"><span>Applicant</span><span>Requested</span><span>Status</span><span>Received</span></div>{rows.map(r=><div className="tr" key={r.id}><span><strong>{r.name}</strong><small>{r.mobile}</small></span><span>{money(r.requested_amount_paise)}</span><span><i className={`pill ${r.status}`}>{r.status.replace('_',' ')}</i></span><span>{new Date(r.created_at).toLocaleDateString('en-IN')}</span></div>)}{!rows.length&&<div className="empty">No applications match this filter.</div>}</div></>}
 function Placeholder({title,text}:{title:string;text:string}){return <div className="empty-page"><span className="eyebrow">SAATHI FINANCE</span><h1>{title}</h1><p>{text}</p></div>}
-export default function App(){const[user,setUser]=useState<User|null>(null),[loading,setLoading]=useState(!!localStorage.getItem('token')),[publicView,setPublicView]=useState<'landing'|'login'|'register'|'guide'>('landing');useEffect(()=>{if(localStorage.getItem('token'))request('/me').then(setUser).catch(()=>localStorage.removeItem('token')).finally(()=>setLoading(false))},[]);if(loading)return <div className="splash"><Brand/><span>Loading securely…</span></div>;if(!user){if(publicView==='guide')return <div className="public-guide-wrap"><header style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'1rem 1.5rem',background:'#123d35',color:'#fff'}}><Brand/><div style={{display:'flex',gap:'0.75rem'}}><button type="button" onClick={()=>setPublicView('landing')} style={{background:'rgba(255,255,255,0.15)',color:'#fff',border:'1px solid rgba(255,255,255,0.3)',borderRadius:'8px',padding:'0.5rem 1rem',cursor:'pointer',fontSize:'0.9rem'}}>← Home</button><button type="button" onClick={()=>setPublicView('login')} style={{background:'#e8b55e',color:'#123d35',border:'none',borderRadius:'8px',padding:'0.5rem 1rem',cursor:'pointer',fontWeight:'700',fontSize:'0.9rem'}}>Sign in</button></div></header><FinancialGuide/></div>;return publicView==='landing'?<Landing onLogin={()=>setPublicView('login')} onRegister={()=>setPublicView('register')} onGuide={()=>setPublicView('guide')}/>:<Login initialMode={publicView} onLogin={setUser} onBack={()=>setPublicView('landing')}/>;}const admin=user.role!=='customer';return <Shell user={user} onLogout={()=>{localStorage.removeItem('token');setUser(null)}}>
-<Routes>{admin?<>
+export default function App(){
+  const[user,setUser]=useState<User|null>(null),[loading,setLoading]=useState(!!localStorage.getItem('token'));
+  const getInitialPublicView=():'landing'|'login'|'register'|'guide'|'calculator'=>{
+    const p=typeof window!=='undefined'?window.location.pathname.toLowerCase():'';
+    if(p.includes('calculator'))return 'calculator';
+    if(p.includes('login'))return 'login';
+    if(p.includes('register'))return 'register';
+    if(p.includes('guide'))return 'guide';
+    return 'landing';
+  };
+  const[publicView,setPublicView]=useState<'landing'|'login'|'register'|'guide'|'calculator'>(getInitialPublicView);
+  useEffect(()=>{if(localStorage.getItem('token'))request('/me').then(u=>{if(u&&u.id)setUser(u);else{localStorage.removeItem('token');setUser(null);}}).catch(()=>localStorage.removeItem('token')).finally(()=>setLoading(false));else setLoading(false);},[]);
+  if(loading)return <div className="splash"><Brand/><span>Loading securely…</span><button type="button" onClick={()=>{localStorage.removeItem('token');setLoading(false);}} style={{marginTop:'1.2rem',background:'none',border:'none',color:'#6e7e78',textDecoration:'underline',cursor:'pointer',fontSize:'0.85rem'}}>Taking too long? Reset session</button></div>;
+  if(!user){
+    if(publicView==='calculator')return <div className="public-calc-wrap">
+      <header className="public-calc-nav">
+        <Brand/>
+        <nav>
+          <button type="button" onClick={()=>{setPublicView('landing');window.history.pushState({},'','/');}} style={{background:'rgba(255,255,255,0.15)',color:'#fff',border:'1px solid rgba(255,255,255,0.3)',borderRadius:'8px',padding:'0.5rem 1rem',cursor:'pointer',fontSize:'0.9rem'}}>← Home</button>
+          <button type="button" onClick={()=>{setPublicView('guide');window.history.pushState({},'','/guide');}} style={{background:'rgba(255,255,255,0.15)',color:'#fff',border:'1px solid rgba(255,255,255,0.3)',borderRadius:'8px',padding:'0.5rem 1rem',cursor:'pointer',fontSize:'0.9rem'}}>वित्तीय समझ (Guide)</button>
+          <button type="button" onClick={()=>{setPublicView('login');window.history.pushState({},'','/login');}} style={{background:'#e8b55e',color:'#123d35',border:'none',borderRadius:'8px',padding:'0.5rem 1rem',cursor:'pointer',fontWeight:'700',fontSize:'0.9rem'}}>Sign in</button>
+        </nav>
+      </header>
+      <div className="public-calc-content">
+        <EmiCalculator isPublic onBack={()=>{setPublicView('landing');window.history.pushState({},'','/');}} onApply={()=>{setPublicView('register');window.history.pushState({},'','/register');}}/>
+      </div>
+    </div>;
+    if(publicView==='guide')return <div className="public-guide-wrap"><header style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'1rem 1.5rem',background:'#123d35',color:'#fff'}}><Brand/><div style={{display:'flex',gap:'0.75rem'}}><button type="button" onClick={()=>{setPublicView('landing');window.history.pushState({},'','/');}} style={{background:'rgba(255,255,255,0.15)',color:'#fff',border:'1px solid rgba(255,255,255,0.3)',borderRadius:'8px',padding:'0.5rem 1rem',cursor:'pointer',fontSize:'0.9rem'}}>← Home</button><button type="button" onClick={()=>{setPublicView('calculator');window.history.pushState({},'','/calculator');}} style={{background:'rgba(255,255,255,0.15)',color:'#fff',border:'1px solid rgba(255,255,255,0.3)',borderRadius:'8px',padding:'0.5rem 1rem',cursor:'pointer',fontSize:'0.9rem'}}>EMI Calculator</button><button type="button" onClick={()=>setPublicView('login')} style={{background:'#e8b55e',color:'#123d35',border:'none',borderRadius:'8px',padding:'0.5rem 1rem',cursor:'pointer',fontWeight:'700',fontSize:'0.9rem'}}>Sign in</button></div></header><FinancialGuide/></div>;
+    return publicView==='landing'?<Landing onLogin={()=>setPublicView('login')} onRegister={()=>setPublicView('register')} onGuide={()=>setPublicView('guide')} onCalculator={()=>{setPublicView('calculator');window.history.pushState({},'','/calculator');}}/>:<Login initialMode={publicView} onLogin={setUser} onBack={()=>{setPublicView('landing');window.history.pushState({},'','/');}}/>;
+  }
+  const admin=user.role!=='customer';
+  return <Shell user={user} onLogout={()=>{localStorage.removeItem('token');setUser(null);window.history.pushState({},'','/');}}>
+<Routes>
+<Route path="/auth/login" element={<Navigate to={admin?"/admin":"/"} replace/>}/>
+<Route path="/auth/register" element={<Navigate to={admin?"/admin":"/"} replace/>}/>
+<Route path="/login" element={<Navigate to={admin?"/admin":"/"} replace/>}/>
+
+{admin?<>
 <Route path="/admin" element={<AdminDashboard/>}/>
 <Route path="/admin/applications" element={<AdminApplications/>}/>
 <Route path="/admin/applications/:id" element={<AdminApplicationDetail/>}/>
@@ -332,7 +401,7 @@ export default function App(){const[user,setUser]=useState<User|null>(null),[loa
 <Route path="/admin/audit" element={<AdminAudit user={user}/>}/>
 <Route path="*" element={<Navigate to="/admin"/>}/></>:<>
 <Route path="/" element={<CustomerHome user={user}/>}/>
-<Route path="/apply" element={<Apply/>}/>
+<Route path="/apply" element={<Apply user={user}/>}/>
 <Route path="/applications/:id" element={<CustomerApplication/>}/>
 <Route path="/loans" element={<CustomerLoans/>}/>
 <Route path="/loans/:id" element={<CustomerLoanDetail/>}/>

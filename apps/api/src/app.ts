@@ -2,13 +2,26 @@ import express from 'express'; import cors from 'cors'; import helmet from 'helm
 import { applicationSchema,calculateSchedule,loginSchema,offerSchema,registerSchema,type Role } from '@saathi/shared'; import { pool,tx } from './db.js'; import { registerAdminRoutes } from './adminRoutes.js';
 const app=express(), secret=process.env.JWT_SECRET||'dev-only-change-this-secret-32chars';
 if(process.env.NODE_ENV==='production')app.set('trust proxy',1);
-app.use(helmet());app.use(cors({origin:process.env.WEB_ORIGIN||'http://localhost:5174',credentials:true}));app.use(express.json({limit:'1mb'}));
+app.use(helmet());
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || process.env.NODE_ENV !== 'production' || origin === (process.env.WEB_ORIGIN || 'http://localhost:5174') || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
+app.use(express.json({limit:'1mb'}));
 const asyncRoute=(fn:any)=>(req:any,res:any,next:any)=>Promise.resolve(fn(req,res,next)).catch(next);
 const token=(u:any)=>jwt.sign({sub:u.id,role:u.role,email:u.email},secret,{expiresIn:'8h'});
 const auth=(roles?:Role[])=>(req:any,res:any,next:any)=>{try{const raw=req.headers.authorization?.replace('Bearer ','');const p=jwt.verify(raw,secret) as any;req.user={id:p.sub,role:p.role,email:p.email};if(roles&&!roles.includes(p.role))return res.status(403).json({error:{code:'FORBIDDEN',message:'You do not have permission.'}});next()}catch{return res.status(401).json({error:{code:'UNAUTHENTICATED',message:'Please sign in.'}})}};
 const audit=(c:any,actor:string,entityType:string,entityId:string,action:string,oldValue:any,newValue:any,reason?:string)=>c.query('INSERT INTO audit_events(actor_id,entity_type,entity_id,action,old_value,new_value,reason) VALUES($1,$2,$3,$4,$5,$6,$7)',[actor,entityType,entityId,action,oldValue,newValue,reason||null]);
 const applicationAccess=async(id:string,u:any)=>{const r=await pool.query('SELECT * FROM applications WHERE id=$1',[id]);if(!r.rowCount)return null;const row=r.rows[0];if(u.role==='customer'&&row.customer_id!==u.id)return false;return row};
 app.get('/health',(_,res)=>res.json({status:'ok'}));
+app.get('/api/health',(_,res)=>res.json({status:'ok'}));
+
 app.post('/api/auth/register',rateLimit({windowMs:60000,limit:8}),asyncRoute(async(req:any,res:any)=>{const d=registerSchema.parse(req.body),hash=await argon2.hash(d.password);const out=await tx(async c=>{const u=await c.query(`INSERT INTO users(email,password_hash,role) VALUES($1,$2,'customer') RETURNING id,email,role`,[d.email.toLowerCase(),hash]);await c.query('INSERT INTO customer_profiles(user_id,name,mobile,consented_at) VALUES($1,$2,$3,now())',[u.rows[0].id,d.name,d.mobile]);return u.rows[0]});res.status(201).json({data:{user:out,token:token(out)}})}));
 app.post('/api/auth/login',rateLimit({windowMs:15*60000,limit:10}),asyncRoute(async(req:any,res:any)=>{const d=loginSchema.parse(req.body),r=await pool.query('SELECT * FROM users WHERE email=$1 AND active=true',[d.email.toLowerCase()]);if(!r.rowCount||!await argon2.verify(r.rows[0].password_hash,d.password))return res.status(401).json({error:{code:'INVALID_CREDENTIALS',message:'Email or password is incorrect.'}});const u=r.rows[0];res.json({data:{user:{id:u.id,email:u.email,role:u.role},token:token(u)}})}));
 app.post('/api/auth/password-reset/request',rateLimit({windowMs:60000,limit:5}),asyncRoute(async(req:any,res:any)=>{const r=await pool.query('SELECT id FROM users WHERE email=$1',[String(req.body.email).toLowerCase()]);if(r.rowCount){const raw=randomBytes(32).toString('hex'),hash=createHash('sha256').update(raw).digest('hex');await pool.query("INSERT INTO password_reset_tokens(user_id,token_hash,expires_at) VALUES($1,$2,now()+interval '30 minutes')",[r.rows[0].id,hash]);if(process.env.NODE_ENV!=='production')res.setHeader('X-Dev-Reset-Token',raw)}res.json({data:{message:'If that account exists, reset instructions are available.'}})}));
